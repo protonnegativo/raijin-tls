@@ -43,6 +43,7 @@ You also need `tlsx` on `PATH` (`go install github.com/projectdiscovery/tlsx/cmd
 ## Usage
 
 ```bash
+raijin-tls --scope scope.txt                              # scan every host the scope names
 raijin-tls --scope scope.txt -u app.example.com
 raijin-tls --scope scope.txt -l hosts.txt -p 443,8443 --max-items 20
 raijin-tls --scope scope.txt -u 10.0.0.0/24 --no-enum      # negotiated version and cipher only, much faster
@@ -59,6 +60,8 @@ example.com
 10.0.0.0/24
 !10.0.0.13
 ```
+
+With no `-u`, `-l` or `--input`, raijin-tls scans what the scope names: every domain, every IP, and every address of ranges up to a /24, minus exclusions. Each host goes to tlsx as it is, so tlsx connects to port 443 unless `-p` says otherwise. A wildcard names no host and a larger range is too big to sweep blindly, so for each one `next` gives the command that enumerates it first (`raijin-subs` or `raijin-ports`).
 
 Targets outside the scope are dropped before tlsx runs. A CIDR target is expanded (up to a /16) and every address is checked on its own, so an exclusion inside a range is never scanned. Results for hosts outside the scope are dropped too. Both are counted in `omitted.out_of_scope`.
 
@@ -194,7 +197,7 @@ The Raijin banner is **off by default**, so normal runs stay small. `--banner` p
 | Flag | Default | |
 |---|---|---|
 | `--scope` | (required) | scope file |
-| `-u` / `-l` / `--input` | | hosts, `host:port`s, IPs or CIDRs, comma-separated (repeatable) / target file / existing tlsx JSONL (repeatable) |
+| `-u` / `-l` / `--input` | every host the scope names | hosts, `host:port`s, IPs or CIDRs, comma-separated (repeatable) / target file / existing tlsx JSONL (repeatable) |
 | `-p` | tlsx's 443 | tlsx `-p`, comma-separated |
 | `--no-enum` | false | do not enumerate versions and ciphers (`-ve -ce`); only check what is negotiated |
 | `--timeout`, `--threads` | | tlsx `-timeout` (seconds) / `-c` |

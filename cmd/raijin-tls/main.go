@@ -42,7 +42,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("raijin-tls", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var hosts, inputs multi
-	fs.Var(&hosts, "u", "host, host:port, IP or CIDR to scan, comma-separated (repeatable)")
+	fs.Var(&hosts, "u", "host, host:port, IP or CIDR to scan, comma-separated (repeatable; default: every host the scope names)")
 	list := fs.String("l", "", "file with one host, host:port, IP or CIDR per line")
 	scopeFile := fs.String("scope", "", "scope file (required): domains, *.wildcards, IPs, CIDRs, !exclusions")
 	ports := fs.String("p", "", "ports to connect to (tlsx -p), comma-separated (default: 443)")
@@ -60,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	showVersion := fs.Bool("version", false, "print the version")
 	showBanner := fs.Bool("banner", false, "print the Raijin banner to stderr (off by default to keep output small)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: raijin-tls --scope scope.txt (-u target | -l targets.txt | --input results.jsonl) [flags] [-- extra tlsx args]\n\n")
+		fmt.Fprintf(stderr, "usage: raijin-tls --scope scope.txt [-u target | -l targets.txt | --input results.jsonl] [flags] [-- extra tlsx args]\n\nWith no targets it scans every host the scope names.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -123,12 +123,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			hosts = append(hosts, lines...)
 		}
-		targets, err := filter(hosts, sc, res.Omitted)
-		if err != nil {
-			fmt.Fprintln(stderr, "raijin-tls:", err)
-			return 1
+		var targets []string
+		if len(hosts) == 0 {
+			// no targets given: scan what the scope names (tlsx connects to port 443 unless -p says otherwise)
+			var wildcards, ranges []string
+			targets, wildcards, ranges = sc.Targets()
+			for _, w := range wildcards {
+				res.Next = append(res.Next, "raijin-subs --scope "+*scopeFile+" -d "+strings.TrimPrefix(w, "*.")+", then raijin-tls -l <live hosts> to cover "+w)
+			}
+			for _, r := range ranges {
+				res.Next = append(res.Next, "raijin-ports --scope "+*scopeFile+" -host "+r+", then raijin-tls -l <open ports> to cover "+r)
+			}
+		} else {
+			var err error
+			targets, err = filter(hosts, sc, res.Omitted)
+			if err != nil {
+				fmt.Fprintln(stderr, "raijin-tls:", err)
+				return 1
+			}
 		}
 		if len(targets) == 0 {
+			if len(res.Next) > 0 {
+				res.Summary = "the scope names no single host to scan"
+				res.Target = *scopeFile
+				write(stdout, &res, *format, *pretty)
+				return 1
+			}
 			fmt.Fprintln(stderr, "raijin-tls: no targets in scope")
 			return 1
 		}
