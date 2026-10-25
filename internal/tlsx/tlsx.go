@@ -94,25 +94,26 @@ type Options struct {
 	Raw io.Writer
 }
 
-// Run scans the targets and returns every event, plus the last stderr lines if tlsx failed.
-func Run(ctx context.Context, targets []string, opt Options) ([]Event, string, error) {
+// Run scans the targets and returns every event and the line counts, plus the last stderr lines if tlsx
+// failed.
+func Run(ctx context.Context, targets []string, opt Options) ([]Event, Stats, string, error) {
 	bin := opt.Binary
 	if bin == "" {
 		bin = "tlsx"
 	}
 	path, err := exec.LookPath(bin)
 	if err != nil {
-		return nil, "", ErrNotFound
+		return nil, Stats{}, "", ErrNotFound
 	}
 
 	list, err := os.CreateTemp("", "raijin-tls-targets-*.txt")
 	if err != nil {
-		return nil, "", err
+		return nil, Stats{}, "", err
 	}
 	defer os.Remove(list.Name())
 	if _, err := io.WriteString(list, strings.Join(targets, "\n")+"\n"); err != nil {
 		list.Close()
-		return nil, "", err
+		return nil, Stats{}, "", err
 	}
 	list.Close()
 
@@ -121,24 +122,24 @@ func Run(ctx context.Context, targets []string, opt Options) ([]Event, string, e
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, "", err
+		return nil, Stats{}, "", err
 	}
 	var r io.Reader = stdout
 	if opt.Raw != nil {
 		r = io.TeeReader(stdout, opt.Raw)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, "", err
+		return nil, Stats{}, "", err
 	}
-	events, parseErr := Parse(r)
+	events, st, parseErr := ParseCount(r)
 	waitErr := cmd.Wait()
 	if parseErr != nil {
-		return events, tail(stderr.String(), 3), parseErr
+		return events, st, tail(stderr.String(), 3), parseErr
 	}
 	if waitErr != nil {
-		return events, tail(stderr.String(), 3), fmt.Errorf("tlsx exited: %w", waitErr)
+		return events, st, tail(stderr.String(), 3), fmt.Errorf("tlsx exited: %w", waitErr)
 	}
-	return events, "", nil
+	return events, st, "", nil
 }
 
 // Args builds the tlsx command line. The certificate, the negotiated version and cipher, and the
@@ -165,27 +166,70 @@ func Args(listFile string, opt Options) []string {
 
 // Parse reads tlsx JSONL. Lines that are not JSON objects with a host are skipped.
 func Parse(r io.Reader) ([]Event, error) {
+	events, _, err := ParseCount(r)
+	return events, err
+}
+
+// Stats counts what Parse saw, for the format check.
+type Stats struct {
+	// Lines is every non-empty line.
+	Lines int
+	// Unparsed is the lines that are not JSON objects with a host: they are not in the events.
+	Unparsed int
+	// Incomplete is the lines without the fields the reducer needs: a host, a port, and a tls_version
+	// (answered) or an error (did not answer). Unparsed lines count here too.
+	Incomplete int
+}
+
+// Essential names the fields Stats.Incomplete checks, for the engine_format hint.
+const Essential = "host, port and (tls_version or error)"
+
+// ParseCount is Parse plus the line counts.
+func ParseCount(r io.Reader) ([]Event, Stats, error) {
 	var events []Event
+	var st Stats
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 || line[0] != '{' {
+		if len(line) == 0 {
 			continue
 		}
+		st.Lines++
 		var ev Event
-		if err := json.Unmarshal(line, &ev); err != nil {
+		if line[0] != '{' || json.Unmarshal(line, &ev) != nil {
+			st.Unparsed++
+			st.Incomplete++
 			continue
 		}
 		if ev.Host == "" {
 			ev.Host = ev.IP
 		}
 		if ev.Host == "" {
+			st.Unparsed++
+			st.Incomplete++
 			continue
+		}
+		if ev.Port == "" || (ev.TLSVersion == "" && ev.Error == "") {
+			st.Incomplete++
 		}
 		events = append(events, ev)
 	}
-	return events, sc.Err()
+	return events, st, sc.Err()
+}
+
+// FormatHint is the engine_format hint, or "" when every line had the essential fields.
+func (st Stats) FormatHint(raw string) string {
+	if st.Incomplete == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d tlsx results had no %s; the engine's output format may have changed. Read %s for the full output",
+		st.Incomplete, st.Lines, Essential, raw)
+}
+
+// Add sums two counts (several --input files).
+func (st Stats) Add(o Stats) Stats {
+	return Stats{st.Lines + o.Lines, st.Unparsed + o.Unparsed, st.Incomplete + o.Incomplete}
 }
 
 func tail(s string, n int) string {

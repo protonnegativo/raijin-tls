@@ -12,9 +12,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 
+	raijintls "github.com/protonnegativo/raijin-tls"
 	"github.com/protonnegativo/raijin-tls/internal/banner"
 	"github.com/protonnegativo/raijin-tls/internal/reduce"
 	"github.com/protonnegativo/raijin-tls/internal/schema"
@@ -99,6 +101,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	opt.InScope = sc.Allowed
 
 	var events []tlsx.Event
+	var stats tlsx.Stats
 	if len(inputs) > 0 {
 		for _, in := range inputs {
 			b, err := os.ReadFile(in)
@@ -106,12 +109,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, "raijin-tls:", err)
 				return 1
 			}
-			ev, err := tlsx.Parse(bytes.NewReader(b))
+			ev, st, err := tlsx.ParseCount(bytes.NewReader(b))
 			if err != nil {
 				fmt.Fprintln(stderr, "raijin-tls:", err)
 				return 1
 			}
 			events = append(events, ev...)
+			stats = stats.Add(st)
 		}
 		res.Target = strings.Join(inputs, ", ")
 	} else {
@@ -173,8 +177,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
+		if e := checkVersion(ctx, *bin); e != nil {
+			res.Errors = append(res.Errors, *e)
+		}
 		var stderrTail string
-		events, stderrTail, err = tlsx.Run(ctx, targets, tlsx.Options{
+		events, stats, stderrTail, err = tlsx.Run(ctx, targets, tlsx.Options{
 			Binary: *bin, Ports: *ports, NoEnum: *noEnum, Timeout: *timeout, Threads: *threads,
 			Extra: fs.Args(), Raw: raw,
 		})
@@ -200,6 +207,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	res.Findings, res.Groups = out.Findings, out.Groups
 	for k, v := range out.Omitted {
 		res.Omitted[k] += v
+	}
+	if stats.Unparsed > 0 {
+		res.Omitted["unparsed"] += stats.Unparsed
+	}
+	if hint := stats.FormatHint(res.Raw + strings.Join(inputs, ", ")); hint != "" {
+		res.Errors = append(res.Errors, schema.Error{Kind: "engine_format", Hint: hint})
 	}
 
 	newCount := -1
@@ -230,6 +243,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	write(stdout, &res, *format, *pretty)
 	return 0
+}
+
+// checkVersion is the engine_version error when the installed tlsx is not the tested version (another
+// major, or older). It never stops the run; a version it cannot read is not reported.
+func checkVersion(ctx context.Context, bin string) *schema.Error {
+	path, err := exec.LookPath(bin)
+	if err != nil {
+		return nil // Run reports missing_engine
+	}
+	engines, err := raijintls.Engines()
+	tested, ok := engines["tlsx"]
+	if err != nil || !ok {
+		return nil
+	}
+	installed := tlsx.Version(ctx, path)
+	if !tlsx.Untested(installed, tested.Version) {
+		return nil
+	}
+	return &schema.Error{Kind: "engine_version", Hint: fmt.Sprintf("tlsx %s is not the tested %s; results may be incomplete. Install the tested version: %s",
+		installed, tested.Version, tested.Install())}
 }
 
 // summary is written before the budget, so it stays true when Fit cuts.
