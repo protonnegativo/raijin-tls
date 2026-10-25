@@ -20,8 +20,9 @@ jobs:
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
-      W: ${{ runner.temp }}/live
     steps:
+      - name: Work dir
+        run: echo "W=$RUNNER_TEMP/live" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
