@@ -25,8 +25,6 @@ import (
 	"github.com/protonnegativo/raijin-tls/internal/tlsx"
 )
 
-const version = "0.1.0"
-
 // maxCIDR is the largest range a target can expand to (a /16). Each address is checked against the
 // scope before tlsx runs, so exclusions inside a range are never scanned.
 const maxCIDR = 1 << 16
@@ -69,10 +67,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if *showBanner {
-		banner.Write(stderr, "raijin-tls", version, useColor(stderr))
+		banner.Write(stderr, "raijin-tls", strings.TrimPrefix(version, "v"), useColor(stderr))
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, "raijin-tls", version)
+		fmt.Fprintln(stdout, versionLine())
 		return 0
 	}
 	if *scopeFile == "" {
@@ -187,7 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		})
 		switch {
 		case errors.Is(err, tlsx.ErrNotFound):
-			res.Errors = append(res.Errors, schema.Error{Kind: "missing_engine", Hint: "install tlsx (go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest) or pass --tlsx <path>"})
+			res.Errors = append(res.Errors, schema.Error{Kind: "missing_engine", Hint: "install tlsx (go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest) or pass --tlsx <path>, or run raijin-mcp update"})
 			res.Summary = "tlsx not found, nothing scanned"
 			res.Raw = ""
 			raw.Close()
@@ -261,7 +259,7 @@ func checkVersion(ctx context.Context, bin string) *schema.Error {
 	if !tlsx.Untested(installed, tested.Version) {
 		return nil
 	}
-	return &schema.Error{Kind: "engine_version", Hint: fmt.Sprintf("tlsx %s is not the tested %s; results may be incomplete. Install the tested version: %s",
+	return &schema.Error{Kind: "engine_version", Hint: fmt.Sprintf("tlsx %s is not the tested %s; results may be incomplete. Install the tested version: %s, or run raijin-mcp update",
 		installed, tested.Version, tested.Install())}
 }
 

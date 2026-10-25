@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	raijintls "github.com/protonnegativo/raijin-tls"
 )
 
 const sample = "../../testdata/sample.jsonl"
@@ -56,7 +59,7 @@ func TestBannerGoesToStderrOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(errb.String(), "TGT-LOCK") || !strings.Contains(errb.String(), "raijin-tls v"+version) {
+	if !strings.Contains(errb.String(), "TGT-LOCK") || !strings.Contains(errb.String(), "raijin-tls v"+strings.TrimPrefix(version, "v")) {
 		t.Errorf("banner missing or without the version: %q", errb.String())
 	}
 	if strings.Contains(out.String(), "TGT-LOCK") {
@@ -112,9 +115,26 @@ func TestTableFormat(t *testing.T) {
 // given. It logs its arguments and the targets, and fails if it is asked to scan an excluded address.
 func fakeTLSX(t *testing.T) (string, string) {
 	t.Helper()
+	return fakeTLSXVersion(t, testedTLSX(t))
+}
+
+// testedTLSX is the tlsx version in engines.json, so a bump there does not break the tests.
+func testedTLSX(t *testing.T) string {
+	t.Helper()
+	engines, err := raijintls.Engines()
+	if err != nil || engines["tlsx"].Version == "" {
+		t.Fatalf("engines.json: %v %+v", err, engines)
+	}
+	return engines["tlsx"].Version
+}
+
+// fakeTLSXVersion is fakeTLSX answering `-version` with ver.
+func fakeTLSXVersion(t *testing.T, ver string) (string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "args.log")
 	body := `#!/bin/sh
+if [ "$1" = "-version" ]; then echo "[INF] Current version: v` + ver + `" >&2; exit 0; fi
 echo "$@" > "` + log + `"
 while [ "$1" != "-l" ]; do shift; done
 cat "$2" >> "` + log + `"
@@ -162,6 +182,36 @@ func TestLiveRunWithFakeEngine(t *testing.T) {
 	}
 	if len(o.Findings) != 1 || o.Findings[0].ID != "old-tls" || o.Findings[0].Locations[0] != "a.example.com:443 [tls10]" {
 		t.Errorf("findings: %s", out.String())
+	}
+}
+
+func TestEngineVersionWarning(t *testing.T) {
+	tested := testedTLSX(t)
+	var major int
+	fmt.Sscanf(tested, "%d.", &major)
+	for _, c := range []struct {
+		installed string
+		warn      bool
+	}{{tested, false}, {fmt.Sprintf("%d.0.0", major+1), true}} {
+		bin, _ := fakeTLSXVersion(t, c.installed)
+		var out, errb bytes.Buffer
+		if code := run([]string{"--scope", scopeFile(t), "--tlsx", bin, "--raw", filepath.Join(t.TempDir(), "raw"), "-u", "a.example.com"}, &out, &errb); code != 0 {
+			t.Fatalf("exit %d: %s", code, errb.String())
+		}
+		var o output
+		json.Unmarshal(out.Bytes(), &o)
+		var hint string
+		for _, e := range o.Errors {
+			if e.Kind == "engine_version" {
+				hint = e.Hint
+			}
+		}
+		if (hint != "") != c.warn {
+			t.Errorf("tlsx %s: engine_version %q, want warning %v", c.installed, hint, c.warn)
+		}
+		if c.warn && (!strings.Contains(hint, "tlsx "+c.installed+" is not the tested "+tested) || !strings.HasSuffix(hint, ", or run raijin-mcp update")) {
+			t.Errorf("hint: %q", hint)
+		}
 	}
 }
 
