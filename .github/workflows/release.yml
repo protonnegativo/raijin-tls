@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: .github/release.sh "${{ inputs.bump || 'patch' }}"

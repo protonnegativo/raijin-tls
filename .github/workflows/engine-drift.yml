@@ -12,7 +12,6 @@ on:
 permissions:
   contents: write
   issues: write
-  pull-requests: write
 
 jobs:
   drift:
@@ -24,6 +23,8 @@ jobs:
       - name: Work dir
         run: echo "W=$RUNNER_TEMP/live" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -69,7 +70,7 @@ jobs:
             ${{ runner.temp }}/live.log
           retention-days: 14
       - name: Open or update the drift issue
-        if: failure() && steps.live.outcome == 'failure'
+        if: failure() && (steps.live.outcome == 'failure' || steps.bump.outputs.tests == 'failure')
         env:
           INSTALLED: ${{ steps.versions.outputs.installed }}
         run: |
@@ -89,7 +90,8 @@ jobs:
           else
             gh issue create --title "Engine drift: tlsx $INSTALLED" --label engine-drift --body-file "$RUNNER_TEMP/issue.md"
           fi
-      - name: Open or update the bump PR
+      - name: Commit the bump and release
+        id: bump
         if: success()
         env:
           INSTALLED: ${{ steps.versions.outputs.installed }}
@@ -100,31 +102,29 @@ jobs:
             echo "tlsx $INSTALLED is not newer than $TESTED; nothing to bump"
             exit 0
           fi
-          # the PR changes engines.json only: BENCHMARK.md numbers come from the committed fixtures
+          # the commit changes engines.json only: BENCHMARK.md numbers come from the committed fixtures
           git checkout -- bench/fixtures
           git clean -fdq bench/fixtures
           jq --arg v "$INSTALLED" '.tlsx.version = $v' engines.json > engines.tmp
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("{\n" + ",\n".join("  %s: %s" % (json.dumps(k), json.dumps(v, separators=(", ", ": "))) for k, v in d.items()) + "\n}")' engines.tmp > engines.json
           rm engines.tmp
-          branch="engine-bump/tlsx-$INSTALLED"
+          if ! go test ./... > "$RUNNER_TEMP/test.log" 2>&1; then
+            cat "$RUNNER_TEMP/test.log"
+            { echo "go test ./... failed with engines.json bumped to tlsx $INSTALLED:"; echo; echo '```'; tail -40 "$RUNNER_TEMP/test.log"; echo '```'; } > "$RUNNER_TEMP/verify.txt"
+            echo "tests=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
           git commit -qam "Test with tlsx $INSTALLED"
-          git push -f origin "$branch"
-          {
-            echo "tlsx $TESTED → $INSTALLED"
-            echo
-            echo "The live benchmark passed with tlsx $INSTALLED:"
-            echo
-            echo '```'
-            cat "$RUNNER_TEMP/verify.txt"
-            echo '```'
-            echo
-            echo "The refreshed fixtures are not in this PR; they are in the live-bench artifact of $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          } > "$RUNNER_TEMP/pr.md"
-          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]; then
-            gh pr edit "$branch" --title "Test with tlsx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
-          else
-            gh pr create --head "$branch" --base "${{ github.event.repository.default_branch }}" --title "Test with tlsx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
-          fi
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          # a push with GITHUB_TOKEN does not trigger release.yml, so tag here
+          .github/release.sh patch
+      - name: Close the drift issue
+        if: success()
+        env:
+          INSTALLED: ${{ steps.versions.outputs.installed }}
+        run: |
+          for n in $(gh issue list --label engine-drift --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Passes with tlsx $INSTALLED: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done

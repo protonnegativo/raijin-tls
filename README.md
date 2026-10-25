@@ -38,7 +38,11 @@ Against tlsx's text output (same probes), raijin-tls is **5.5×** smaller on the
 go install github.com/protonnegativo/raijin-tls/cmd/raijin-tls@latest
 ```
 
+This installs the latest release.
+
 You also need `tlsx` on `PATH` (`go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest`), or pass `--tlsx <path>`.
+
+**Versions.** A release is tagged automatically on every change and on every passing engine update. `raijin-tls --version` shows the release and the tested engine versions (`raijin-tls v0.1.0 (tested with tlsx 1.4.0)`). `raijin-mcp update` updates every Raijin tool at once.
 
 ## Usage
 
@@ -212,7 +216,7 @@ The Raijin banner is **off by default**, so normal runs stay small. `--banner` p
 
 ## Engine versions
 
-The tested tlsx version is in `engines.json` (embedded in the binary). raijin-tls adds an `engine_version` error when the installed tlsx has another major version or is older, and an `engine_format` error when tlsx's lines lack the fields it reads (`host`, `port`, and `tls_version` or `error`); neither stops the run. A weekly GitHub Actions job runs the live benchmark with the latest tlsx and opens a PR to bump `engines.json` when it passes, or an `engine-drift` issue when it breaks. The runner's OpenSSL (Ubuntu 24.04, 3.0) still allows TLS 1.0 and 1.1 at security level 0, which the lab's legacy endpoints need; if a future runner drops them, those endpoints fail the handshake and verify still checks tlsx's own output against raijin-tls.
+The tested tlsx version is in `engines.json` (embedded in the binary). raijin-tls adds an `engine_version` error when the installed tlsx has another major version or is older, and an `engine_format` error when tlsx's lines lack the fields it reads (`host`, `port`, and `tls_version` or `error`); neither stops the run. A weekly GitHub Actions job runs the live benchmark with the latest tlsx and commits the bump to `engines.json` and tags a release when it passes, or an `engine-drift` issue when it breaks. The runner's OpenSSL (Ubuntu 24.04, 3.0) still allows TLS 1.0 and 1.1 at security level 0, which the lab's legacy endpoints need; if a future runner drops them, those endpoints fail the handshake and verify still checks tlsx's own output against raijin-tls.
 
 ## Development
 
