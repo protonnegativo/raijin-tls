@@ -1,0 +1,129 @@
+name: Engine drift
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      tlsx:
+        description: tlsx version to test (latest or a version like 1.2.2)
+        default: latest
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      W: ${{ runner.temp }}/live
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install engines
+        env:
+          WANT: ${{ inputs.tlsx || 'latest' }}
+        run: |
+          v=$WANT
+          case "$v" in latest) ;; v*) ;; *) v="v$v" ;; esac
+          go install "$(jq -r .tlsx.go engines.json)@$v"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Engine versions
+        id: versions
+        run: |
+          tlsx -version -duc 2>&1 | tail -1
+          installed=$(tlsx -version -duc 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tail -1)
+          tested=$(jq -r .tlsx.version engines.json)
+          openssl version
+          echo "installed=$installed" >> "$GITHUB_OUTPUT"
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+          echo "tlsx installed $installed, tested $tested"
+      - run: pip install tiktoken
+      - name: Live benchmark
+        id: live
+        run: |
+          set +e
+          LIVE=1 PY=python3 bench/run.sh "$W" > "$RUNNER_TEMP/live.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/live.log"
+          grep -E 'tlsx results|MISSING' "$RUNNER_TEMP/live.log" > "$RUNNER_TEMP/verify.txt" || true
+          if grep -h -o '"kind":"engine_format","hint":"[^"]*' "$W"/*.live.json >> "$RUNNER_TEMP/verify.txt"; then rc=1; fi
+          if grep -qE '[1-9][0-9]* missing' "$RUNNER_TEMP/verify.txt"; then rc=1; fi
+          exit $rc
+      - name: Save live workdir
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-bench
+          path: |
+            ${{ runner.temp }}/live
+            bench/fixtures
+            ${{ runner.temp }}/live.log
+          retention-days: 14
+      - name: Open or update the drift issue
+        if: failure() && steps.live.outcome == 'failure'
+        env:
+          INSTALLED: ${{ steps.versions.outputs.installed }}
+        run: |
+          gh label create engine-drift --color B60205 --description "An engine update broke the tool" 2>/dev/null || true
+          {
+            echo "The live benchmark failed with tlsx $INSTALLED (tested: $(jq -r .tlsx.version engines.json))."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/verify.txt"
+            echo '```'
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/issue.md"
+          n=$(gh issue list --label engine-drift --state open --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh issue create --title "Engine drift: tlsx $INSTALLED" --label engine-drift --body-file "$RUNNER_TEMP/issue.md"
+          fi
+      - name: Open or update the bump PR
+        if: success()
+        env:
+          INSTALLED: ${{ steps.versions.outputs.installed }}
+          TESTED: ${{ steps.versions.outputs.tested }}
+        run: |
+          newer=$(printf '%s\n%s\n' "$TESTED" "$INSTALLED" | sort -V | tail -1)
+          if [ -z "$INSTALLED" ] || [ "$INSTALLED" = "$TESTED" ] || [ "$newer" != "$INSTALLED" ]; then
+            echo "tlsx $INSTALLED is not newer than $TESTED; nothing to bump"
+            exit 0
+          fi
+          # the PR changes engines.json only: BENCHMARK.md numbers come from the committed fixtures
+          git checkout -- bench/fixtures
+          git clean -fdq bench/fixtures
+          jq --arg v "$INSTALLED" '.tlsx.version = $v' engines.json > engines.tmp
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("{\n" + ",\n".join("  %s: %s" % (json.dumps(k), json.dumps(v, separators=(", ", ": "))) for k, v in d.items()) + "\n}")' engines.tmp > engines.json
+          rm engines.tmp
+          branch="engine-bump/tlsx-$INSTALLED"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -qam "Test with tlsx $INSTALLED"
+          git push -f origin "$branch"
+          {
+            echo "tlsx $TESTED → $INSTALLED"
+            echo
+            echo "The live benchmark passed with tlsx $INSTALLED:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/verify.txt"
+            echo '```'
+            echo
+            echo "The refreshed fixtures are not in this PR; they are in the live-bench artifact of $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/pr.md"
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')" ]; then
+            gh pr edit "$branch" --title "Test with tlsx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
+          else
+            gh pr create --head "$branch" --base "${{ github.event.repository.default_branch }}" --title "Test with tlsx $INSTALLED" --body-file "$RUNNER_TEMP/pr.md"
+          fi
