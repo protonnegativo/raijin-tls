@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/protonnegativo/raijin-core/scope"
 	"github.com/protonnegativo/raijin-tls/internal/schema"
-	"github.com/protonnegativo/raijin-tls/internal/scope"
 	"github.com/protonnegativo/raijin-tls/internal/tlsx"
 )
 

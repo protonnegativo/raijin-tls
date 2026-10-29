@@ -23,8 +23,8 @@ Reproduce from the saved tlsx output: `bench/run.sh`. Start the lab, rescan it a
 |---|---:|---:|---:|
 | tlsx `-json` | 23,065 | 8,420 | 1× |
 | tlsx text | 12,196 | 5,054 | 1.7× |
-| **raijin-tls JSON (default)** | 2,668 | **927** | **9.1×** |
-| raijin-tls `--pretty` | 3,776 | 1,215 | 6.9× |
+| **raijin-tls JSON (default)** | 2,724 | **949** | **8.9×** |
+| raijin-tls `--pretty` | 3,836 | 1,240 | 6.8× |
 | raijin-tls `--format table` | 333 | 101 | 83× |
 
 ## Scenario 2: findings
@@ -41,8 +41,8 @@ Reproduce from the saved tlsx output: `bench/run.sh`. Start the lab, rescan it a
 |---|---:|---:|---:|
 | tlsx `-json` | 17,890 | 6,523 | 1× |
 | tlsx text | 9,757 | 4,037 | 1.6× |
-| **raijin-tls JSON (default)** | 5,646 | **1,997** | **3.3×** |
-| raijin-tls `--pretty` | 7,966 | 2,633 | 2.5× |
+| **raijin-tls JSON (default)** | 5,702 | **2,019** | **3.2×** |
+| raijin-tls `--pretty` | 8,026 | 2,658 | 2.5× |
 | raijin-tls `--format table` | 1,508 | 469 | 13.9× |
 
 In both scenarios the raijin-tls JSON includes about 10 tokens for `target`, the path of the replayed fixture. A live run writes the targets there and adds about 18 tokens for `raw`.
@@ -71,10 +71,10 @@ What the JSON leaves out stays in `raw`, which raijin-tls saves to disk: timesta
 
 ## Reading the numbers
 
-- **Against tlsx's JSON**, the structured output an agent would parse, raijin-tls uses **9.1×** fewer tokens on the noisy run and **3.3×** fewer on the findings run. tlsx's JSON repeats the whole certificate on every endpoint (DNs, CNs, organizations, three fingerprints, serial), writes every suite twice (IANA and OpenSSL names), and lists the full cipher list of every version on every endpoint.
+- **Against tlsx's JSON**, the structured output an agent would parse, raijin-tls uses **8.9×** fewer tokens on the noisy run and **3.2×** fewer on the findings run. tlsx's JSON repeats the whole certificate on every endpoint (DNs, CNs, organizations, three fingerprints, serial), writes every suite twice (IANA and OpenSSL names), and lists the full cipher list of every version on every endpoint.
 - **Against tlsx's text output**, the gap depends on the run:
-  - noisy: **5.5× smaller** (5,054 → 927);
-  - findings: **2.0× smaller** (4,037 → 1,997).
+  - noisy: **5.3× smaller** (5,054 → 949);
+  - findings: **2.0× smaller** (4,037 → 2,019).
 
   When many endpoints share a certificate and a configuration, the text repeats both on every endpoint, and raijin-tls writes each once with every endpoint. When most endpoints have their own certificate, raijin-tls pays for one group per certificate and the field names; in exchange the agent gets the SANs, issuer and dates the text leaves out, the issues ranked with a severity, and each suite once.
 - **The output stays bounded.** On a scan too big for `--max-bytes`, raijin-tls cuts the least important data first: group locations, then groups, then extra locations of low-ranked findings, then low-ranked findings. Every cut is counted in `omitted`, and `next` points to the raw file. tlsx's output has no upper bound.

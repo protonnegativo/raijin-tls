@@ -1,5 +1,11 @@
 # ⚡ Raijin TLS
 
+[![CI](https://github.com/protonnegativo/raijin-tls/actions/workflows/ci.yml/badge.svg)](https://github.com/protonnegativo/raijin-tls/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/protonnegativo/raijin-tls)](https://github.com/protonnegativo/raijin-tls/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/protonnegativo/raijin-tls)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/protonnegativo/raijin-tls.svg)](https://pkg.go.dev/github.com/protonnegativo/raijin-tls)
+[![Go Report Card](https://goreportcard.com/badge/github.com/protonnegativo/raijin-tls)](https://goreportcard.com/report/github.com/protonnegativo/raijin-tls)
+
 **tlsx for AI agents: weak protocols, weak ciphers and certificate issues, grouped by issue, with every endpoint's certificate and TLS configuration collapsed.**
 
 `raijin-tls` is a tool of **Raijin**, an arsenal of offensive security tools built for AI agents. It runs [tlsx](https://github.com/projectdiscovery/tlsx) with the certificate checks and the version and cipher enumeration turned on, and returns the **Raijin Schema**: one compact JSON where every issue (expired, self-signed, mismatched, TLS 1.0, a weak cipher...) is one ranked finding that lists every affected `host:port`, endpoints with the same certificate share one group, endpoints with the same TLS configuration share another, and anything it had to cut is counted.
@@ -12,17 +18,17 @@ Here are the same endpoints, with the same certificates, versions and ciphers, r
 
 ```
 Noisy: 15 endpoints, 2 certificates, 2 TLS configurations, no issues
-  raijin-tls      ██▎                       927 tokens
+  raijin-tls      ██▎                       949 tokens
   tlsx text       ████████████            5,054 tokens
   tlsx JSON       ████████████████████    8,420 tokens
 
 Findings: 11 endpoints, 6 certificates, 8 findings (2 high, 3 medium, 2 low, 1 info)
-  raijin-tls      ██████▏                 1,997 tokens
+  raijin-tls      ██████▏                 2,019 tokens
   tlsx text       ████████████▍           4,037 tokens
   tlsx JSON       ████████████████████    6,523 tokens
 ```
 
-raijin-tls reads **9.1×** fewer tokens than tlsx's JSON on the noisy run and **3.3×** fewer on the findings run. Each scenario's bars are drawn to scale against the JSON.
+raijin-tls reads **8.9×** fewer tokens than tlsx's JSON on the noisy run and **3.2×** fewer on the findings run. Each scenario's bars are drawn to scale against the JSON.
 
 - **Nothing is lost.** Every endpoint tlsx reported is in the output, with its negotiated version and cipher, every version and cipher it accepts, and its certificate (fingerprint, subject, SANs, issuer, validity). `bench/verify.py` checked 26 tlsx results in the two scenarios, attribute by attribute, and none were missing.
 - **The real problems come first.** An expired certificate and SSLv3 are high, a self-signed or mismatched certificate and TLS 1.0 are medium, CBC on old protocols and a certificate about to expire are low. Each is one finding with every endpoint that has it.
@@ -30,7 +36,7 @@ raijin-tls reads **9.1×** fewer tokens than tlsx's JSON on the noisy run and **
 - **Output is bounded.** On a huge scan, `--max-bytes` cuts the least important data first and counts every cut.
 - **Details are one file away.** tlsx's JSONL is saved to a file, and its path is in `raw`. It holds the serials, the organizations, every fingerprint, the OpenSSL cipher names and tlsx's full errors, costs no tokens until the agent opens it, and replays with `--input`.
 
-Against tlsx's text output (same probes), raijin-tls is **5.5×** smaller on the noisy run and **2.0×** smaller on the findings run, where most endpoints have their own certificate. The text output also has no grouping, no ranking, no SANs, no issuer and no expiry dates. Full method and numbers are in [BENCHMARK.md](BENCHMARK.md), and `bench/run.sh` reproduces them.
+Against tlsx's text output (same probes), raijin-tls is **5.3×** smaller on the noisy run and **2.0×** smaller on the findings run, where most endpoints have their own certificate. The text output also has no grouping, no ranking, no SANs, no issuer and no expiry dates. Full method and numbers are in [BENCHMARK.md](BENCHMARK.md), and `bench/run.sh` reproduces them.
 
 ## Install
 
@@ -77,8 +83,9 @@ Targets outside the scope are dropped before tlsx runs. A CIDR target is expande
 
 ```json
 {
+  "schema_version": 1,
   "tool": "raijin-tls",
-  "version": "0.1.0",
+  "version": "v0.1.0",
   "target": "bench/fixtures/findings/raw.jsonl",
   "summary": "11 endpoints, 6 certificates, 8 findings (2 high, 3 medium, 2 low, 1 info), 10 groups, 1 no TLS",
   "findings": [
@@ -182,7 +189,9 @@ What the reducer does:
   4. the lowest-ranked findings.
 
   Every cut is counted in `omitted`, `budget.truncated` is set, and `next` points to the raw file. `--max-items` caps the number of findings (0, the default, keeps all).
-- **Errors** say what to try next. If tlsx is missing, nothing runs and the exit code is 2.
+- **`schema_version`** is the first field (currently `1`), so a reader can check the shape it parses.
+- **Errors** say what to try next. An invalid scope file gives `errors` with `kind: "scope"`, one per invalid line (`line 3: ...`), and scans nothing.
+- **Exit codes:** 0 is ok; 1 is a usage error (bad flag, missing `--scope`, no target in scope), with the message on stderr and nothing on stdout; 2 is a structured error with the JSON on stdout (invalid scope, a scope that names no single host, tlsx not found), which an agent tells apart by `errors[].kind`, or by `next` when there is no error.
 
 Fields an agent can rebuild are left out to save tokens:
 
@@ -225,7 +234,7 @@ go test ./...
 go vet ./...
 ```
 
-Standard library only. tlsx runs as a subprocess with `-json -silent -nc -duc -ex -ss -mm -wc -tps -ve -ce`, so the binary stays small and the engine can be updated on its own. The CLI tests run the live path offline with a small fake tlsx; `testdata/sample.jsonl` is a synthetic run with what the lab cannot produce (SSLv3, RC4 and 3DES, an untrusted certificate, IPv6, an SNI that is not the host, one host on several IPs, an out-of-scope host and a repeated line), and the unit tests cover the NULL, export, anonymous, IDEA and MD5 suites. `bench/lab.py` and `bench/certs.sh` are the local lab of the benchmark: TLS servers on 127.0.0.1 with certificates generated by openssl (a lab CA, expired, self-signed, mismatched, expiring and wildcard certificates) and a legacy server that accepts TLS 1.0.
+The only dependency is [raijin-core](https://github.com/protonnegativo/raijin-core) (scope, schema envelope and state); everything else is the standard library. tlsx runs as a subprocess with `-json -silent -nc -duc -ex -ss -mm -wc -tps -ve -ce`, so the binary stays small and the engine can be updated on its own. The CLI tests run the live path offline with a small fake tlsx; `testdata/sample.jsonl` is a synthetic run with what the lab cannot produce (SSLv3, RC4 and 3DES, an untrusted certificate, IPv6, an SNI that is not the host, one host on several IPs, an out-of-scope host and a repeated line), and the unit tests cover the NULL, export, anonymous, IDEA and MD5 suites. `bench/lab.py` and `bench/certs.sh` are the local lab of the benchmark: TLS servers on 127.0.0.1 with certificates generated by openssl (a lab CA, expired, self-signed, mismatched, expiring and wildcard certificates) and a legacy server that accepts TLS 1.0.
 
 ## Responsible use
 

@@ -255,6 +255,26 @@ func TestUsageErrorsExitOne(t *testing.T) {
 	}
 }
 
+// A scope that names only wildcards and ranges has nothing to scan: structured error, exit 2, JSON on stdout.
+func TestScopeWithNoSingleHostExitsTwoWithJSON(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", scopeFile(t)}, &out, &errb); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %q", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Errorf("stdout must start with the schema envelope: %.60s", out.String())
+	}
+}
+
+func TestUsageErrorsPrintNoJSON(t *testing.T) {
+	for _, args := range [][]string{{"--input", sample}, {"--scope", scopeFile(t), "-u", "out.of-scope.net"}, {"--scope", scopeFile(t), "--bogus"}} {
+		var out, errb bytes.Buffer
+		if code := run(args, &out, &errb); code != 1 || out.Len() != 0 {
+			t.Errorf("%v: exit %d, stdout %q; want 1 and empty", args, code, out.String())
+		}
+	}
+}
+
 func TestBudgetCutsAreCountedAndPointToRaw(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"--scope", scopeFile(t), "--input", sample, "--max-bytes", "1500"}, &out, &errb); code != 0 {
@@ -304,5 +324,78 @@ func TestScopeAloneScansWhatTheScopeNames(t *testing.T) {
 	}
 	if len(res.Next) != 1 || !strings.Contains(res.Next[0], "raijin-subs --scope "+scopePath+" -d example.com") {
 		t.Errorf("next = %v", res.Next)
+	}
+}
+
+func TestOutputStartsWithSchemaVersion(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", scopeFile(t), "--input", sample}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,"tool":"raijin-tls",`) {
+		t.Errorf("output must start with schema_version: %.80s", out.String())
+	}
+}
+
+func TestInvalidScopeIsStructuredAndScansNothing(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "scope.txt")
+	if err := os.WriteFile(p, []byte("example.com\nexample.com:443\n10.0.0.7/24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin, log := fakeTLSX(t)
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", p, "--tlsx", bin, "-u", "example.com"}, &out, &errb); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %q", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Errorf("stdout must start with the schema envelope: %.60s", out.String())
+	}
+	var v struct {
+		SchemaVersion int `json:"schema_version"`
+		Summary       string
+		Findings      []any
+		Groups        []any
+		Errors        []struct{ Kind, Hint string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatalf("stdout is not JSON: %v: %q", err, out.String())
+	}
+	if v.SchemaVersion != 1 || v.Summary != "invalid scope file, nothing scanned" || len(v.Findings) != 0 || len(v.Groups) != 0 {
+		t.Errorf("unexpected result: %+v", v)
+	}
+	if len(v.Errors) != 2 {
+		t.Fatalf("want one error per invalid line (port, host bits), got %+v", v.Errors)
+	}
+	for _, e := range v.Errors {
+		if e.Kind != "scope" {
+			t.Errorf("kind = %q, want scope", e.Kind)
+		}
+	}
+	if !strings.Contains(v.Errors[0].Hint, "line 2") || !strings.Contains(v.Errors[0].Hint, "port") {
+		t.Errorf("hint for the port rule: %q", v.Errors[0].Hint)
+	}
+	if !strings.Contains(v.Errors[1].Hint, "line 3") || !strings.Contains(v.Errors[1].Hint, "host bits") {
+		t.Errorf("hint for the CIDR rule: %q", v.Errors[1].Hint)
+	}
+	if _, err := os.Stat(log); err == nil {
+		t.Error("the engine ran with an invalid scope")
+	}
+}
+
+func TestStateMarksNewAcrossRuns(t *testing.T) {
+	st := filepath.Join(t.TempDir(), "state.json")
+	args := []string{"--scope", scopeFile(t), "--input", sample, "--state", st}
+	var first, second, errb bytes.Buffer
+	if code := run(args, &first, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(first.String(), `"new":true`) {
+		t.Errorf("first run should mark findings new: %s", first.String())
+	}
+	if code := run(args, &second, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if strings.Contains(second.String(), `"new":true`) {
+		t.Errorf("second run should have nothing new: %s", second.String())
 	}
 }

@@ -8,13 +8,20 @@ import (
 	raijintls "github.com/protonnegativo/raijin-tls"
 )
 
-// version is the release this binary was installed from (go install ...@vX.Y.Z or @latest), or
-// "dev" with the VCS revision for a local go build.
+// releaseVersion is set by the release build (-ldflags "-X main.releaseVersion=vX.Y.Z"); it is empty
+// for go install and for a local go build.
+var releaseVersion string
+
+// version is the release this binary was built as: releaseVersion, else the module version of
+// go install ...@vX.Y.Z or @latest, else "dev" with the VCS revision for a local go build.
 var version = buildVersion(debug.ReadBuildInfo())
 
-// buildVersion is Main.Version when it is a module version, else "dev-<revision>[+dirty]" from the
-// build settings ("dev" alone when there is no revision).
+// buildVersion is releaseVersion when set, else Main.Version when it is a module version, else
+// "dev-<revision>[+dirty]" from the build settings ("dev" alone when there is no revision).
 func buildVersion(info *debug.BuildInfo, ok bool) string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
 	if !ok || info == nil {
 		return "dev"
 	}

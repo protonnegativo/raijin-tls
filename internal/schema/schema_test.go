@@ -61,3 +61,13 @@ func TestCountAndBudgetAppearWhenSomethingIsCut(t *testing.T) {
 		t.Errorf("budget must be written once when something was cut: %s", s)
 	}
 }
+
+func TestResultStartsWithSchemaVersion(t *testing.T) {
+	b, err := Marshal(Result{Tool: "raijin-tls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(b), `{"schema_version":1,"tool":"raijin-tls",`) {
+		t.Errorf("got %s", b)
+	}
+}
