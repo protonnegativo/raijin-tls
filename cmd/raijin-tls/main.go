@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,12 +15,12 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/protonnegativo/raijin-core/scope"
+	"github.com/protonnegativo/raijin-core/state"
 	raijintls "github.com/protonnegativo/raijin-tls"
 	"github.com/protonnegativo/raijin-tls/internal/banner"
 	"github.com/protonnegativo/raijin-tls/internal/reduce"
 	"github.com/protonnegativo/raijin-tls/internal/schema"
-	"github.com/protonnegativo/raijin-tls/internal/scope"
-	"github.com/protonnegativo/raijin-tls/internal/state"
 	"github.com/protonnegativo/raijin-tls/internal/tlsx"
 )
 
@@ -77,11 +76,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "raijin-tls: --scope is required")
 		return 1
 	}
-	sc, err := scope.Load(*scopeFile)
-	if err != nil {
-		fmt.Fprintln(stderr, "raijin-tls: scope:", err)
-		return 1
-	}
 
 	res := schema.Result{
 		Tool:     "raijin-tls",
@@ -92,6 +86,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		Errors:   []schema.Error{},
 		Next:     []string{},
 		Budget:   schema.Budget{MaxItems: *maxItems, MaxBytes: *maxBytes},
+	}
+	sc, err := scope.Load(*scopeFile)
+	if err != nil {
+		// an invalid scope is an error the caller can fix: report every bad line, scan nothing
+		res.Target = *scopeFile
+		res.Errors = append(res.Errors, scope.SchemaErrors(err)...)
+		res.Summary = "invalid scope file, nothing scanned"
+		write(stdout, &res, *format, *pretty)
+		return 1
 	}
 	opt := reduce.Defaults()
 	opt.MaxItems = *maxItems
@@ -219,7 +222,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 		} else {
-			newCount = st.Mark(res.Findings, out.AllLocations)
+			newCount = state.Mark(st, res.Findings, out.AllLocations,
+				func(f *schema.Finding) string { return f.Fingerprint },
+				func(f *schema.Finding) { f.New = true })
 			if err := st.Save(*statePath); err != nil {
 				res.Errors = append(res.Errors, schema.Error{Kind: "state_error", Hint: err.Error()})
 			}
@@ -314,12 +319,7 @@ func write(w io.Writer, res *schema.Result, format string, pretty bool) {
 		}
 		return
 	}
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	if pretty {
-		enc.SetIndent("", "  ")
-	}
-	_ = enc.Encode(res)
+	_ = schema.Write(w, res, pretty)
 }
 
 // describe is a one-line view of a group for the table: the certificate subject and expiry, or the
