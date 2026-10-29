@@ -2,7 +2,8 @@
 # Tags HEAD with the next release and creates its GitHub Release.
 # Usage: release.sh [patch|minor|major]   (default patch)
 # With BEFORE set (the commit before a push), it skips a push that only touched files the binary does
-# not use. It skips HEAD when it already has a tag. Needs GH_TOKEN for gh.
+# not use. It skips HEAD when it already has a tag. Needs GH_TOKEN for gh,
+# with actions: write to start goreleaser.yml.
 set -euo pipefail
 
 bump=${1:-patch}
@@ -39,4 +40,6 @@ git config user.email >/dev/null || git config user.email "41898282+github-actio
 git tag -a "$tag" -m "$tag"
 git push origin "$tag"
 gh release create "$tag" --generate-notes --verify-tag
+# events created with GITHUB_TOKEN do not start other workflows, so start the binaries build by hand
+gh workflow run goreleaser.yml -f tag="$tag"
 echo "released $tag"
