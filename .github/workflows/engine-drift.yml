@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Work dir
         run: echo "W=$RUNNER_TEMP/live" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
