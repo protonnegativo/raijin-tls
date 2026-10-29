@@ -191,7 +191,7 @@ What the reducer does:
   Every cut is counted in `omitted`, `budget.truncated` is set, and `next` points to the raw file. `--max-items` caps the number of findings (0, the default, keeps all).
 - **`schema_version`** is the first field (currently `1`), so a reader can check the shape it parses.
 - **Errors** say what to try next. An invalid scope file gives `errors` with `kind: "scope"`, one per invalid line (`line 3: ...`), and scans nothing.
-- **Exit codes:** 0 is ok; 1 is a usage error (bad flag, missing `--scope`, no target in scope), with the message on stderr; 2 is a structured error with the JSON on stdout (invalid scope, tlsx not found), which an agent tells apart by `errors[].kind`.
+- **Exit codes:** 0 is ok; 1 is a usage error (bad flag, missing `--scope`, no target in scope), with the message on stderr and nothing on stdout; 2 is a structured error with the JSON on stdout (invalid scope, a scope that names no single host, tlsx not found), which an agent tells apart by `errors[].kind`, or by `next` when there is no error.
 
 Fields an agent can rebuild are left out to save tokens:
 

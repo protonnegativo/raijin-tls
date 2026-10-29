@@ -152,7 +152,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				res.Summary = "the scope names no single host to scan"
 				res.Target = *scopeFile
 				write(stdout, &res, *format, *pretty)
-				return 1
+				return 2
 			}
 			fmt.Fprintln(stderr, "raijin-tls: no targets in scope")
 			return 1

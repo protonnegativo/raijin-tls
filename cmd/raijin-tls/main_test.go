@@ -255,6 +255,26 @@ func TestUsageErrorsExitOne(t *testing.T) {
 	}
 }
 
+// A scope that names only wildcards and ranges has nothing to scan: structured error, exit 2, JSON on stdout.
+func TestScopeWithNoSingleHostExitsTwoWithJSON(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--scope", scopeFile(t)}, &out, &errb); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %q", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Errorf("stdout must start with the schema envelope: %.60s", out.String())
+	}
+}
+
+func TestUsageErrorsPrintNoJSON(t *testing.T) {
+	for _, args := range [][]string{{"--input", sample}, {"--scope", scopeFile(t), "-u", "out.of-scope.net"}, {"--scope", scopeFile(t), "--bogus"}} {
+		var out, errb bytes.Buffer
+		if code := run(args, &out, &errb); code != 1 || out.Len() != 0 {
+			t.Errorf("%v: exit %d, stdout %q; want 1 and empty", args, code, out.String())
+		}
+	}
+}
+
 func TestBudgetCutsAreCountedAndPointToRaw(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"--scope", scopeFile(t), "--input", sample, "--max-bytes", "1500"}, &out, &errb); code != 0 {
