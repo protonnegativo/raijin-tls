@@ -324,8 +324,11 @@ func TestInvalidScopeIsStructuredAndScansNothing(t *testing.T) {
 	}
 	bin, log := fakeTLSX(t)
 	var out, errb bytes.Buffer
-	if code := run([]string{"--scope", p, "--tlsx", bin, "-u", "example.com"}, &out, &errb); code != 1 {
-		t.Fatalf("exit %d, want 1; stderr %q", code, errb.String())
+	if code := run([]string{"--scope", p, "--tlsx", bin, "-u", "example.com"}, &out, &errb); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %q", code, errb.String())
+	}
+	if !strings.HasPrefix(out.String(), `{"schema_version":1,`) {
+		t.Errorf("stdout must start with the schema envelope: %.60s", out.String())
 	}
 	var v struct {
 		SchemaVersion int `json:"schema_version"`
