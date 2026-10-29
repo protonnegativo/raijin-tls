@@ -1,5 +1,11 @@
 # ⚡ Raijin TLS
 
+[![CI](https://github.com/protonnegativo/raijin-tls/actions/workflows/ci.yml/badge.svg)](https://github.com/protonnegativo/raijin-tls/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/protonnegativo/raijin-tls)](https://github.com/protonnegativo/raijin-tls/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/protonnegativo/raijin-tls)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/protonnegativo/raijin-tls.svg)](https://pkg.go.dev/github.com/protonnegativo/raijin-tls)
+[![Go Report Card](https://goreportcard.com/badge/github.com/protonnegativo/raijin-tls)](https://goreportcard.com/report/github.com/protonnegativo/raijin-tls)
+
 **tlsx for AI agents: weak protocols, weak ciphers and certificate issues, grouped by issue, with every endpoint's certificate and TLS configuration collapsed.**
 
 `raijin-tls` is a tool of **Raijin**, an arsenal of offensive security tools built for AI agents. It runs [tlsx](https://github.com/projectdiscovery/tlsx) with the certificate checks and the version and cipher enumeration turned on, and returns the **Raijin Schema**: one compact JSON where every issue (expired, self-signed, mismatched, TLS 1.0, a weak cipher...) is one ranked finding that lists every affected `host:port`, endpoints with the same certificate share one group, endpoints with the same TLS configuration share another, and anything it had to cut is counted.
